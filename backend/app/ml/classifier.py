@@ -9,7 +9,7 @@ term coverage and match strength. This is intentionally explainable (judges
 can see exactly why a report was classified a certain way) rather than a
 black box.
 
-FUTURE PRODUCTION INTEGRATION: swap `classify()` for a fine-tuned
+FUTURE PRODUCTION INTEGRATION: swap `predict()` for a fine-tuned
 transformer (e.g. a Hugging Face sequence-classification head trained on
 labelled Indian weather report text) behind the same function signature.
 """
@@ -78,8 +78,8 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9\s#]", " ", (text or "").lower())
 
 
-def classify(text: str, hashtags=None):
-    """Return (event_type, confidence) for a report's free text."""
+def predict(text: str, hashtags=None) -> dict:
+    """Return structured classification results for a report's free text."""
     norm = _normalize(text)
     tag_text = " ".join(h.lower().lstrip("#") for h in (hashtags or []))
     haystack = f"{norm} {tag_text}"
@@ -100,7 +100,7 @@ def classify(text: str, hashtags=None):
             scores[category] = round(confidence, 2)
 
     if not scores:
-        return "Other", 0.30
+        return {"category": "Other", "confidence": 0.30}
 
     best_category = max(scores, key=scores.get)
-    return best_category, scores[best_category]
+    return {"category": best_category, "confidence": scores[best_category]}

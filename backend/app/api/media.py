@@ -30,7 +30,7 @@ async def upload_media(file: UploadFile = File(...), declared_category: str | No
 
     media_type = "video" if file.content_type.startswith("video/") else "image"
     url = save_media(contents, file.filename or "upload", file.content_type)
-    category, confidence, summary = image_ml.analyze(declared_category, media_type)
+    category, confidence, summary = image_ml.analyze(declared_category, media_type, image_bytes=contents)
 
     return {
         "media_url": url, "media_type": media_type,

@@ -75,7 +75,7 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("")
-async def create_report(payload: schemas.ReportIn, db: Session = Depends(get_db)):
+async def create_report(payload: schemas.WeatherReport, db: Session = Depends(get_db)):
     report = await ingest_report(db, payload.model_dump())
     return _serialize(report)
 

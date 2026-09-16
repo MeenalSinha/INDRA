@@ -10,7 +10,7 @@ import random
 from . import models
 from .database import SessionLocal, engine, Base, ensure_schema
 from .demo.scenarios import SEED_EVENTS
-from .ml.reliability import score_source
+from .ml.reliability import predict as score_source
 
 SOURCE_DEFS = [
     ("IMD Government Feed", "government"),
@@ -73,7 +73,8 @@ def run_seed():
 
         sources = {}
         for name, stype in SOURCE_DEFS:
-            score, trust = score_source(stype, verification_history_count=random.randint(5, 60), metadata_completeness=0.75)
+            result = score_source(stype, verification_history_count=random.randint(5, 60), metadata_completeness=0.75)
+            score, trust = result["score"], result["trust_level"]
             src = models.Source(name=name, source_type=stype, trust_level=trust, reliability_score=score,
                                  verification_history_count=random.randint(5, 60))
             db.add(src)

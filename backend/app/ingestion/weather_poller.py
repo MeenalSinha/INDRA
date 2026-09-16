@@ -110,33 +110,49 @@ def _owm_to_report(data: dict) -> dict | None:
     }
 
 
-async def _poll_once(db_session_factory):
-    """Single poll cycle — fetch current weather for all configured cities."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        for city_q in OWM_CITIES:
-            try:
-                resp = await client.get(
-                    _OWM_BASE,
-                    params={"q": city_q, "appid": OWM_API_KEY},
-                )
-                if resp.status_code != 200:
-                    log.debug("OWM %s → HTTP %s", city_q, resp.status_code)
-                    continue
-                data = resp.json()
-                payload = _owm_to_report(data)
-                if payload is None:
-                    log.debug("OWM %s → no event condition (%s)", city_q, data.get("weather", [{}])[0].get("main"))
-                    continue
+from .adapters import WeatherAPIAdapter
 
-                from .adapters import ingest_report
+class OWMAdapter(WeatherAPIAdapter):
+    """Implementation of WeatherAPIAdapter for OpenWeatherMap."""
+    def __init__(self):
+        self.api_key = OWM_API_KEY
+        self.cities = OWM_CITIES
+        self.base_url = _OWM_BASE
+
+    def fetch(self) -> list[dict]:
+        raise NotImplementedError("Use async_fetch for OWM API")
+        
+    async def async_fetch(self) -> list[dict]:
+        reports = []
+        async with httpx.AsyncClient(timeout=10) as client:
+            for city_q in self.cities:
+                try:
+                    resp = await client.get(
+                        self.base_url,
+                        params={"q": city_q, "appid": self.api_key},
+                    )
+                    if resp.status_code != 200:
+                        log.debug("OWM %s → HTTP %s", city_q, resp.status_code)
+                        continue
+                    data = resp.json()
+                    payload = _owm_to_report(data)
+                    if payload:
+                        reports.append(payload)
+                except Exception as exc:
+                    log.warning("OWM poll error for %s: %s", city_q, exc)
+        return reports
+        
+    async def poll(self, db_session_factory):
+        raw_reports = await self.async_fetch()
+        for raw in raw_reports:
+            payload = self.normalize(raw)
+            if self.validate(payload):
                 db = db_session_factory()
                 try:
-                    await ingest_report(db, payload, broadcast=True)
-                    log.info("OWM ingested: %s → %s", city_q, payload["text"][:80])
+                    await self.publish(db, payload)
+                    log.info("OWM ingested: %s → %s", payload.get("city"), payload["text"][:80])
                 finally:
                     db.close()
-            except Exception as exc:
-                log.warning("OWM poll error for %s: %s", city_q, exc)
 
 
 async def run_weather_poller(db_session_factory):
@@ -150,9 +166,10 @@ async def run_weather_poller(db_session_factory):
         "OpenWeatherMap poller active: %d cities, interval %ds.",
         len(OWM_CITIES), OWM_POLL_INTERVAL,
     )
+    adapter = OWMAdapter()
     while True:
         try:
-            await _poll_once(db_session_factory)
+            await adapter.poll(db_session_factory)
         except Exception as exc:
             log.error("OWM poll cycle failed: %s", exc)
         await asyncio.sleep(OWM_POLL_INTERVAL)

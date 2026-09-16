@@ -16,8 +16,8 @@ TYPE_PRIOR = {
 }
 
 
-def score_source(source_type: str, verification_history_count: int, metadata_completeness: float,
-                  cross_source_agreement: float = 0.5):
+def predict(source_type: str, verification_history_count: int, metadata_completeness: float,
+                  cross_source_agreement: float = 0.5) -> dict:
     prior = TYPE_PRIOR.get(source_type, 0.5)
     history_boost = min(0.15, verification_history_count * 0.01)
     score = (
@@ -36,4 +36,4 @@ def score_source(source_type: str, verification_history_count: int, metadata_com
         trust_level = "LOW TRUST"
     else:
         trust_level = "UNKNOWN"
-    return score, trust_level
+    return {"score": score, "trust_level": trust_level}

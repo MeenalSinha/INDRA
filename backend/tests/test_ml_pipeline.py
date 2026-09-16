@@ -1,23 +1,26 @@
-from app.ml.classifier import classify
+from app.ml.classifier import predict
 from app.ml.duplicate import find_duplicates
 from app.geo.clustering import cluster_reports
-from app.ml.reliability import score_source
+from app.ml.reliability import predict as score_source
 from app.fusion.severity import compute_severity
 
 
 def test_classifier_flood():
-    event_type, confidence = classify("Roads completely flooded after 3 hours of heavy rain")
+    result = predict("Roads completely flooded after 3 hours of heavy rain")
+    event_type, confidence = result["category"], result["confidence"]
     assert event_type == "Urban Flooding"
     assert 0 < confidence <= 1
 
 
 def test_classifier_fog():
-    event_type, confidence = classify("Dense fog reducing visibility on the highway")
+    result = predict("Dense fog reducing visibility on the highway")
+    event_type, confidence = result["category"], result["confidence"]
     assert event_type == "Fog"
 
 
 def test_classifier_unknown_defaults_other():
-    event_type, confidence = classify("Just a normal sunny day, nothing unusual")
+    result = predict("Just a normal sunny day, nothing unusual")
+    event_type, confidence = result["category"], result["confidence"]
     assert event_type == "Other"
 
 
@@ -65,7 +68,8 @@ def test_clustering_groups_nearby_points():
 
 
 def test_source_reliability_government_high_trust():
-    score, trust = score_source("government", verification_history_count=50, metadata_completeness=0.9)
+    result = score_source("government", verification_history_count=50, metadata_completeness=0.9)
+    score, trust = result["score"], result["trust_level"]
     assert score > 0.6
     assert trust in ("HIGH TRUST", "MEDIUM TRUST")
 

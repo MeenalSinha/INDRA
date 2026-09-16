@@ -23,8 +23,9 @@ from .. import config, models
 from ..geo.utils import haversine_km
 from ..geo.postgis import sync_event_geom
 from ..ml.embeddings import pairwise_similarity
-from ..ml.reliability import score_source
+from ..ml.reliability import predict as score_source
 from .severity import compute_severity
+from ..geo.risk_zones import get_risk_zones, check_intersection
 
 WEIGHTS = {
     "semantic_similarity": 0.20,
@@ -87,11 +88,12 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
     # --- source reliability: average across contributing sources ----------
     reliability_scores = []
     for r in reports:
-        s, _ = score_source(
+        result = score_source(
             r.source_type or "citizen",
             verification_history_count=0,
             metadata_completeness=0.8 if (r.latitude and r.text) else 0.4,
         )
+        s, _ = result["score"], result["trust_level"]
         reliability_scores.append(s)
     source_reliability = sum(reliability_scores) / len(reliability_scores) if reliability_scores else 0.5
 
@@ -135,6 +137,16 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
         confidence=confidence,
         has_image_evidence=media_count > 0,
     )
+
+    # --- risk zones check ----------------------------------------------------
+    zones = get_risk_zones(db)
+    intersecting_zones = check_intersection(lat, lng, zones)
+    if intersecting_zones:
+        # Boost severity and append reason
+        if severity != "CRITICAL":
+            severity = "CRITICAL" if any(z["risk_level"] == "CRITICAL" for z in intersecting_zones) else "HIGH"
+        zone_names = [z["name"] for z in intersecting_zones]
+        reasons.append(f"Intersects high-risk zones: {', '.join(zone_names)}")
 
     # --- find existing event already linked to any of these reports -------
     existing_link = (

@@ -41,34 +41,69 @@ INDIAN_CITY_COORDS = {
     "bhubaneswar": (20.2961, 85.8245, "Odisha"),
 }
 
+from abc import ABC, abstractmethod
 
-class WeatherSourceAdapter:
+class DataSourceAdapter(ABC):
+    @property
+    @abstractmethod
+    def source_type(self) -> str:
+        pass
+
+    @abstractmethod
+    def fetch(self) -> list[dict]:
+        pass
+
+    def normalize(self, raw: dict) -> dict:
+        return normalize_payload(raw)
+
+    def validate(self, payload: dict) -> bool:
+        return True
+
+    async def publish(self, db, payload: dict):
+        if self.validate(payload):
+            return await ingest_report(db, payload)
+        return None
+
+class IMDAdapter(DataSourceAdapter):
+    source_type = "government"
+    def fetch(self): return []
+
+class GovernmentWeatherAdapter(DataSourceAdapter):
+    source_type = "government"
+    def fetch(self): return []
+
+class WeatherAPIAdapter(DataSourceAdapter):
     source_type = "weather_api"
+    def fetch(self): return []
 
-
-class SocialSourceAdapter:
-    source_type = "social"
-
-
-class CitizenReportAdapter:
-    source_type = "citizen"
-
-
-class DatasetAdapter:
+class DatasetAdapter(DataSourceAdapter):
     source_type = "dataset"
+    def fetch(self): return []
 
+class SocialMediaAdapter(DataSourceAdapter):
+    source_type = "social"
+    def fetch(self): return []
 
-class MediaAdapter:
+class CitizenReportAdapter(DataSourceAdapter):
     source_type = "citizen"
+    def fetch(self): return []
 
+class MediaAdapter(DataSourceAdapter):
+    source_type = "image"
+    def fetch(self): return []
 
 def normalize_payload(raw: dict) -> dict:
     """Schema validation, timestamp/GPS normalization, missing-value handling."""
     payload = dict(raw)
     payload.setdefault("text", "")
-    payload.setdefault("hashtags", [])
-    payload.setdefault("raw_metadata", {})
-
+    payload.setdefault("metadata", {})
+    
+    # Extract hashtags if not present
+    if "hashtags" not in payload and payload.get("text"):
+        import re
+        payload["hashtags"] = list(set(re.findall(r"#(\w+)", payload["text"])))
+    else:
+        payload.setdefault("hashtags", [])
     # Timestamp normalization
     ts = payload.get("timestamp")
     if isinstance(ts, str):
@@ -136,7 +171,7 @@ async def ingest_report(db, raw_payload: dict, broadcast: bool = True) -> models
         city=payload.get("city"),
         state=payload.get("state"),
         hashtags=payload.get("hashtags", []),
-        raw_metadata=payload.get("raw_metadata", {}),
+        raw_metadata=payload.get("metadata", {}),
         processing_status="PROCESSING",
     )
     db.add(report)
@@ -152,7 +187,8 @@ async def ingest_report(db, raw_payload: dict, broadcast: bool = True) -> models
         })
 
     # --- AI classification -------------------------------------------------
-    event_type, confidence = classifier.classify(report.text, report.hashtags)
+    result = classifier.predict(report.text, report.hashtags)
+    event_type, confidence = result["category"], result["confidence"]
     report.event_type = event_type
     report.classification_confidence = confidence
     report.processing_status = "ANALYZED"
@@ -163,14 +199,26 @@ async def ingest_report(db, raw_payload: dict, broadcast: bool = True) -> models
         })
 
     # --- media / image evidence --------------------------------------------
-    media_url = payload.get("media_url")
-    if media_url:
-        category, img_confidence, summary = image_ml.analyze(payload.get("media_category"), payload.get("media_type", "image"))
-        db.add(models.Media(
-            report_id=report.id, media_url=media_url, media_type=payload.get("media_type", "image"),
-            detected_category=category, analysis_confidence=img_confidence, evidence_summary=summary,
-        ))
-        db.commit()
+    media_list = payload.get("media", [])
+    # Fallback to older media_url for backwards compatibility
+    if not media_list and payload.get("media_url"):
+        media_list = [payload.get("media_url")]
+        
+    for media_item in media_list:
+        if isinstance(media_item, str):
+            media_url = media_item
+            media_type = "image"
+        else:
+            media_url = media_item.get("url")
+            media_type = media_item.get("type", "image")
+            
+        if media_url:
+            category, img_confidence, summary = image_ml.analyze(None, media_type)
+            db.add(models.Media(
+                report_id=report.id, media_url=media_url, media_type=media_type,
+                detected_category=category, analysis_confidence=img_confidence, evidence_summary=summary,
+            ))
+    db.commit()
 
     # --- duplicate detection against recent nearby reports ------------------
     window_start = report.timestamp - dt.timedelta(minutes=180)
@@ -301,7 +349,12 @@ async def ingest_report(db, raw_payload: dict, broadcast: bool = True) -> models
             # §7: email delivery — gated behind ALERT_EMAIL_ENABLED, never raises
             try:
                 from ..notifications.email import send_critical_alert_email
+                from ..notifications.sms import send_critical_alert_sms
+                from ..notifications.push import send_critical_alert_push
+                
                 send_critical_alert_email(event.title, event.report_count, event.confidence)
+                send_critical_alert_sms(event.title, event.report_count)
+                send_critical_alert_push(event.title)
             except Exception:
                 pass  # email failure must never break ingestion
 

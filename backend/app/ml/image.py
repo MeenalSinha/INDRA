@@ -119,8 +119,33 @@ def analyze(declared_category: str | None, media_type: str = "image",
 
     Returns: (category, confidence, evidence_summary)
     """
-    # PATH A: real image analysis
+    # PATH A: real image/video analysis
     if image_bytes and _CV2_AVAILABLE:
+        if media_type == "video":
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+                tmp.write(image_bytes)
+                tmp_path = tmp.name
+            
+            try:
+                cap = cv2.VideoCapture(tmp_path)
+                if not cap.isOpened():
+                    return "Normal Conditions", 0.50, "Video could not be decoded"
+                    
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                duration = round(frame_count / fps, 1) if fps > 0 else 0
+                
+                # We only implement metadata extraction for videos, not full event classification
+                summary = f"Video Metadata Extraction: {width}x{height}, {frame_count} frames, {duration}s. No deep frame analysis implemented."
+                cap.release()
+                return "Normal Conditions", 0.50, summary
+            finally:
+                import os
+                os.unlink(tmp_path)
+                
         return _analyze_image_bytes(image_bytes)
 
     # PATH B: declared-category fallback (Demo Mode / seed data)

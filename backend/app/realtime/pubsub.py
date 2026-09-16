@@ -31,7 +31,13 @@ from collections import deque
 log = logging.getLogger("indra.realtime.pubsub")
 
 _KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
-_KAFKA_TOPIC = "indra.events"
+_KAFKA_TOPICS = ["weather.reports", "weather.events", "weather.alerts", "weather.processed"]
+
+def _get_topic_for_event(event_type: str) -> str:
+    if event_type.startswith("report."): return "weather.reports"
+    if event_type.startswith("event."): return "weather.events"
+    if event_type.startswith("alert."): return "weather.alerts"
+    return "weather.processed"
 
 _subscribers: list[asyncio.Queue] = []
 _recent_events = deque(maxlen=200)
@@ -54,7 +60,7 @@ def _get_kafka_producer():
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             request_timeout_ms=5000,
         )
-        log.info("Kafka producer connected to %s, topic=%s", _KAFKA_SERVERS, _KAFKA_TOPIC)
+        log.info("Kafka producer connected to %s", _KAFKA_SERVERS)
         return _kafka_producer
     except Exception as exc:
         log.error("Kafka producer init failed (%s) — using in-process bus.", exc)
@@ -94,8 +100,9 @@ async def publish(event_type: str, payload: dict) -> dict:
     # --- Kafka publish (fire-and-forget, never blocks ingestion) -----------
     producer = _get_kafka_producer()
     if producer is not None:
+        topic = _get_topic_for_event(event_type)
         try:
-            producer.send(_KAFKA_TOPIC, value=message)
+            producer.send(topic, value=message)
             # Don't flush synchronously — producer batches are fine for our
             # throughput; a background consumer relays back to local bus.
         except Exception as exc:
@@ -122,14 +129,14 @@ async def start_kafka_consumer():
         try:
             from kafka import KafkaConsumer
             consumer = await loop.run_in_executor(None, lambda: KafkaConsumer(
-                _KAFKA_TOPIC,
+                *_KAFKA_TOPICS,
                 bootstrap_servers=_KAFKA_SERVERS.split(","),
                 group_id="indra-ws-relay",
                 auto_offset_reset="latest",
                 value_deserializer=lambda b: json.loads(b.decode("utf-8")),
                 consumer_timeout_ms=1000,
             ))
-            log.info("Kafka consumer connected, relaying %s → WebSocket.", _KAFKA_TOPIC)
+            log.info("Kafka consumer connected, relaying topics %s → WebSocket.", _KAFKA_TOPICS)
             while True:
                 # poll in executor so we don't block the event loop
                 records = await loop.run_in_executor(
