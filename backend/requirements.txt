@@ -1,0 +1,25 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+pydantic==2.9.2
+scikit-learn==1.5.2
+numpy==1.26.4
+python-multipart==0.0.9
+websockets==13.1
+pytest==8.3.3
+httpx==0.27.2
+psycopg2-binary==2.9.9
+alembic==1.13.3
+redis==5.0.8
+pyjwt==2.9.0
+# §6 Users table / bcrypt passwords
+passlib[bcrypt]
+# §4 Sentence-Transformers ML backend (optional — falls back to TF-IDF if not installed)
+# sentence-transformers  # large install (~1 GB with torch); uncomment for Live Mode ML
+# §4 OpenCV image heuristic (optional — falls back to declared-category if not installed)
+opencv-python-headless
+# §1 Kafka/Redpanda streaming (optional — falls back to in-process bus if not installed)
+kafka-python
+# §2 MinIO object storage (optional — falls back to local disk if not installed)
+minio
+# §5 OpenWeatherMap poller (httpx already above, no additional package needed)

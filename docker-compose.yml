@@ -1,0 +1,129 @@
+version: "3.9"
+
+# One-command start: docker compose up --build
+#
+# By default the backend runs in DEMO MODE against its own local SQLite
+# file (no DATABASE_URL set), so the whole stack is usable immediately.
+# Uncomment the DATABASE_URL / REDIS_URL / KAFKA_BOOTSTRAP_SERVERS /
+# MINIO_* env vars on the backend service to switch to LIVE MODE against
+# the real infrastructure services also defined below.
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: indra
+      POSTGRES_PASSWORD: indra_dev_password
+      POSTGRES_DB: indra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indra -d indra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+    healthcheck:
+      # rpk cluster info exits 0 when the broker is ready
+      test: ["CMD-SHELL", "rpk cluster info --brokers=localhost:9092 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 20s
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: indra_minio
+      MINIO_ROOT_PASSWORD: indra_minio_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # Use curl to hit the MinIO health endpoint — mc is not in the image
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Leave DATABASE_URL unset → DEMO MODE (SQLite + in-process bus).
+      # Uncomment below to run against the real stack above (LIVE MODE):
+      # DATABASE_URL: postgresql+psycopg2://indra:indra_dev_password@postgres:5432/indra
+      # REDIS_URL: redis://redis:6379/0
+      # KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # MINIO_ENDPOINT: minio:9000
+      # MINIO_ACCESS_KEY: indra_minio
+      # MINIO_SECRET_KEY: indra_minio_secret
+      CORS_ORIGINS: "*"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-demo-admin-token}
+      REQUIRE_ADMIN_TOKEN: ${REQUIRE_ADMIN_TOKEN:-false}
+      REQUIRE_JWT_AUTH: ${REQUIRE_JWT_AUTH:-false}
+      JWT_SECRET: ${JWT_SECRET:-indra-demo-jwt-secret-change-in-production}
+      DEMO_ADMIN_USERNAME: ${DEMO_ADMIN_USERNAME:-admin}
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-indra-admin-demo}
+      DEMO_ANALYST_USERNAME: ${DEMO_ANALYST_USERNAME:-analyst}
+      DEMO_ANALYST_PASSWORD: ${DEMO_ANALYST_PASSWORD:-indra-analyst-demo}
+      DEMO_VIEWER_USERNAME: ${DEMO_VIEWER_USERNAME:-viewer}
+      DEMO_VIEWER_PASSWORD: ${DEMO_VIEWER_PASSWORD:-indra-viewer-demo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  minio_data:
+  backend_data:

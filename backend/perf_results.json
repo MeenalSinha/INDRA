@@ -1,0 +1,71 @@
+{
+  "target": 10000,
+  "base_url": "http://localhost:8000",
+  "started_at": "2026-09-16T11:51:49.787833",
+  "checkpoints": [
+    {
+      "sent": 100,
+      "errors": 0,
+      "elapsed_s": 4.4,
+      "rps": 22.6,
+      "p50_ms": 37.5,
+      "p95_ms": 62.7
+    },
+    {
+      "sent": 200,
+      "errors": 0,
+      "elapsed_s": 7.3,
+      "rps": 27.4,
+      "p50_ms": 30.7,
+      "p95_ms": 62.7
+    },
+    {
+      "sent": 300,
+      "errors": 0,
+      "elapsed_s": 10.9,
+      "rps": 27.5,
+      "p50_ms": 30.2,
+      "p95_ms": 64.6
+    },
+    {
+      "sent": 400,
+      "errors": 0,
+      "elapsed_s": 14.0,
+      "rps": 28.5,
+      "p50_ms": 31.4,
+      "p95_ms": 64.6
+    },
+    {
+      "sent": 500,
+      "errors": 0,
+      "elapsed_s": 18.5,
+      "rps": 27.0,
+      "p50_ms": 32.0,
+      "p95_ms": 64.6
+    },
+    {
+      "sent": 600,
+      "errors": 0,
+      "elapsed_s": 23.4,
+      "rps": 25.7,
+      "p50_ms": 33.1,
+      "p95_ms": 70.5
+    },
+    {
+      "sent": 700,
+      "errors": 0,
+      "elapsed_s": 27.7,
+      "rps": 25.3,
+      "p50_ms": 33.1,
+      "p95_ms": 83.0
+    },
+    {
+      "sent": 800,
+      "errors": 19,
+      "elapsed_s": 31.7,
+      "rps": 25.2,
+      "p50_ms": 33.0,
+      "p95_ms": 83.0
+    }
+  ]
+}
