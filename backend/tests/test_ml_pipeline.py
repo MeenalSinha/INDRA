@@ -1,56 +1,90 @@
-from app.ml.classifier import predict
-from app.ml.duplicate import find_duplicates
+"""
+ML pipeline unit tests — updated to use the new AI provider registry
+instead of the deleted app.ml module.
+"""
+import pytest
+import asyncio
+import datetime as dt
+
+from app.ai.providers.text_classifier import RuleBasedTextClassifier
+from app.ai.providers.duplicate_detector import DefaultDuplicateDetector
+from app.ai.providers.trust_assessor import DefaultTrustAssessor
 from app.geo.clustering import cluster_reports
-from app.ml.reliability import predict as score_source
 from app.fusion.severity import compute_severity
 
 
-def test_classifier_flood():
-    result = predict("Roads completely flooded after 3 hours of heavy rain")
-    event_type, confidence = result["category"], result["confidence"]
-    assert event_type == "Urban Flooding"
-    assert 0 < confidence <= 1
-
-
-def test_classifier_fog():
-    result = predict("Dense fog reducing visibility on the highway")
-    event_type, confidence = result["category"], result["confidence"]
-    assert event_type == "Fog"
-
-
-def test_classifier_unknown_defaults_other():
-    result = predict("Just a normal sunny day, nothing unusual")
-    event_type, confidence = result["category"], result["confidence"]
-    assert event_type == "Other"
-
+# --------------------------------------------------------------------------- #
+# Helpers                                                                      #
+# --------------------------------------------------------------------------- #
 
 class FakeReport:
-    def __init__(self, id, text, lat, lng, ts):
-        self.id, self.text, self.latitude, self.longitude, self.timestamp = id, text, lat, lng, ts
+    def __init__(self, id, text, lat, lng, ts, source_name="test"):
+        self.id = id
+        self.text = text
+        self.latitude = lat
+        self.longitude = lng
+        self.timestamp = ts
+        self.source_name = source_name
 
 
-def test_duplicate_detection_close_reports():
-    import datetime as dt
+# --------------------------------------------------------------------------- #
+# Text classifier                                                               #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_classifier_flood():
+    c = RuleBasedTextClassifier()
+    r = await c.predict("Roads completely flooded after 3 hours of heavy rain", [])
+    assert r.prediction == "Urban Flooding"
+    assert 0 < r.confidence <= 1
+
+
+@pytest.mark.asyncio
+async def test_classifier_fog():
+    c = RuleBasedTextClassifier()
+    r = await c.predict("Dense fog reducing visibility on the highway", [])
+    assert r.prediction == "Fog"
+
+
+@pytest.mark.asyncio
+async def test_classifier_unknown_defaults_other():
+    c = RuleBasedTextClassifier()
+    r = await c.predict("Just a normal sunny day, nothing unusual", [])
+    assert r.prediction == "Other"
+
+
+# --------------------------------------------------------------------------- #
+# Duplicate detection                                                          #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_duplicate_detection_close_reports():
     t0 = dt.datetime.utcnow()
     reports = [
         FakeReport(1, "Heavy rain flooding roads near Gandhi Maidan", 25.594, 85.137, t0),
         FakeReport(2, "Heavy rain flooding roads near Gandhi Maidan", 25.595, 85.138, t0 + dt.timedelta(minutes=5)),
     ]
-    dups = find_duplicates(reports)
+    detector = DefaultDuplicateDetector()
+    dups = await detector.find_duplicates(reports)
     assert len(dups) == 1
     assert dups[0]["report_id"] == 2
 
 
-def test_duplicate_detection_far_apart_not_duplicate():
-    import datetime as dt
+@pytest.mark.asyncio
+async def test_duplicate_detection_far_apart_not_duplicate():
     t0 = dt.datetime.utcnow()
     reports = [
         FakeReport(1, "Heavy rain flooding roads", 25.594, 85.137, t0),
-        FakeReport(2, "Heavy rain flooding roads", 19.076, 72.877, t0),  # Mumbai, far away
+        FakeReport(2, "Heavy rain flooding roads", 19.076, 72.877, t0),  # Mumbai
     ]
-    dups = find_duplicates(reports)
+    detector = DefaultDuplicateDetector()
+    dups = await detector.find_duplicates(reports)
     assert len(dups) == 0
 
+
+# --------------------------------------------------------------------------- #
+# Geo clustering                                                               #
+# --------------------------------------------------------------------------- #
 
 def test_clustering_groups_nearby_points():
     class R:
@@ -58,7 +92,6 @@ def test_clustering_groups_nearby_points():
             self.id, self.latitude, self.longitude = id, lat, lng
     reports = [R(1, 25.594, 85.137), R(2, 25.595, 85.138), R(3, 19.076, 72.877)]
     clusters = cluster_reports(reports)
-    # the two Patna points should share a cluster label, distinct from Mumbai
     labels = {}
     for label, ids in clusters.items():
         for rid in ids:
@@ -67,12 +100,21 @@ def test_clustering_groups_nearby_points():
     assert labels[3] != labels[1]
 
 
-def test_source_reliability_government_high_trust():
-    result = score_source("government", verification_history_count=50, metadata_completeness=0.9)
-    score, trust = result["score"], result["trust_level"]
-    assert score > 0.6
-    assert trust in ("HIGH TRUST", "MEDIUM TRUST")
+# --------------------------------------------------------------------------- #
+# Source reliability / trust assessor                                          #
+# --------------------------------------------------------------------------- #
 
+@pytest.mark.asyncio
+async def test_source_reliability_government_high_trust():
+    assessor = DefaultTrustAssessor()
+    result = await assessor.predict("government", verification_history_count=50, metadata_completeness=0.9)
+    assert result.confidence > 0.6
+    assert result.prediction in ("HIGH TRUST", "MEDIUM TRUST")
+
+
+# --------------------------------------------------------------------------- #
+# Severity                                                                     #
+# --------------------------------------------------------------------------- #
 
 def test_severity_critical_for_large_flood():
     severity, reasons = compute_severity(

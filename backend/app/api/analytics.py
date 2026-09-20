@@ -5,7 +5,7 @@ from sqlalchemy import func
 from .. import models
 from ..core.database import get_db
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
 
 @router.get("/summary")

@@ -10,8 +10,8 @@ compute_confidence() ->  weighted scalar (0..0.97)
 from collections import Counter
 from ..core import config
 from ..geo.utils import haversine_km
-from ..ml.embeddings import pairwise_similarity
-from ..ml.reliability import predict as score_source
+from ..geo.utils import haversine_km
+from ..ai.registry import get_embedding_provider, get_trust_assessor
 
 WEIGHTS = {
     "semantic_similarity": 0.20,
@@ -34,7 +34,7 @@ def _spatial_spread_km(coords: list[tuple[float, float]]) -> float:
     return max_d
 
 
-def compute_breakdown(
+async def compute_breakdown(
     texts: list[str],
     coords: list[tuple[float, float]],
     timestamps: list,
@@ -62,7 +62,8 @@ def compute_breakdown(
     """
     # --- semantic similarity ---------------------------------------------------
     if len(texts) >= 2:
-        sim_matrix = pairwise_similarity(texts)
+        embedding_provider = get_embedding_provider()
+        sim_matrix = await embedding_provider.pairwise_similarity(texts)
         vals = [sim_matrix[i][j] for i in range(len(texts)) for j in range(i + 1, len(texts))]
         semantic_similarity = sum(vals) / len(vals) if vals else 0.5
     else:
@@ -85,13 +86,14 @@ def compute_breakdown(
 
     # --- source reliability ----------------------------------------------------
     reliability_scores = []
+    trust_assessor = get_trust_assessor()
     for src_type, lat_text_available in zip(source_types, [True] * len(source_types)):
-        result = score_source(
+        result = await trust_assessor.predict(
             src_type or "citizen",
             verification_history_count=0,
             metadata_completeness=0.8 if lat_text_available else 0.4,
         )
-        reliability_scores.append(result["score"])
+        reliability_scores.append(result.confidence)
     source_reliability = sum(reliability_scores) / len(reliability_scores) if reliability_scores else 0.5
 
     # --- independent evidence --------------------------------------------------

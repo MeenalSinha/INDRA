@@ -9,7 +9,9 @@ from .seed import run_seed
 from .api import reports, events, analytics, alerts, demo, media, auth as auth_api
 from .realtime.manager import websocket_endpoint
 from .security.auth import check_rate_limit
-
+from .ai import init_ai_providers
+from .geo.registry import init_geo_providers
+from .core.middleware import ObservabilityMiddleware
 app = FastAPI(
     title="INDRA — National Weather Intelligence Platform",
     description=(
@@ -28,6 +30,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(ObservabilityMiddleware)
+
 app.include_router(reports.router)
 app.include_router(events.router)
 app.include_router(analytics.router)
@@ -44,7 +48,7 @@ app.mount("/media", StaticFiles(directory=os.getenv("LOCAL_MEDIA_DIR", "./data/m
 async def rate_limit_middleware(request: Request, call_next):
     # Exempt static assets / websocket upgrade / docs from the counter --
     # this guards the write/query-heavy API surface, not asset serving.
-    if request.url.path.startswith("/api/"):
+    if request.url.path.startswith("/api/v1/"):
         try:
             check_rate_limit(request)
         except Exception as exc:
@@ -58,11 +62,14 @@ async def rate_limit_middleware(request: Request, call_next):
 def on_startup():
     Base.metadata.create_all(bind=engine)
     ensure_schema()
-    run_seed()
+    init_ai_providers()
+    init_geo_providers()
 
 
 @app.on_event("startup")
 async def on_startup_async():
+    await run_seed()
+    
     # §1: Start Kafka consumer relay (no-op if KAFKA_BOOTSTRAP_SERVERS unset)
     from .realtime.pubsub import start_kafka_consumer
     await start_kafka_consumer()

@@ -22,11 +22,14 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..core import config
-from ..ml import classifier, image as image_ml
 from ..geo import clustering
-from ..geo.postgis import sync_report_geom
+from ..geo.registry import get_spatial_store
 from ..fusion import engine as fusion_engine
-from ..ml.duplicate import find_duplicates
+from ..ai.registry import (
+    get_text_classifier,
+    get_image_analyzer,
+    get_duplicate_detector
+)
 from ..realtime import pubsub
 
 
@@ -84,7 +87,8 @@ class IngestionService:
         db.add(report)
         db.commit()
         db.refresh(report)
-        sync_report_geom(db, report.id, report.latitude, report.longitude)
+        store = get_spatial_store()
+        store.sync_report_geom(db, report.id, report.latitude, report.longitude)
         db.commit()
 
         if broadcast:
@@ -101,8 +105,11 @@ class IngestionService:
     # ------------------------------------------------------------------ #
 
     async def _classify(self, db: Session, report: models.Report, broadcast: bool) -> str:
-        result = classifier.predict(report.text, report.hashtags)
-        event_type, confidence = result["category"], result["confidence"]
+        classifier = get_text_classifier()
+        result = await classifier.predict(report.text, report.hashtags)
+        event_type = result.prediction
+        confidence = result.confidence
+        
         report.event_type = event_type
         report.classification_confidence = confidence
         report.processing_status = "ANALYZED"
@@ -133,11 +140,16 @@ class IngestionService:
                 media_type = media_item.get("type", "image")
 
             if media_url:
-                category, img_confidence, summary = image_ml.analyze(None, media_type)
+                analyzer = get_image_analyzer()
+                result = await analyzer.analyze(None, media_type)
+                
                 db.add(models.Media(
-                    report_id=report.id, media_url=media_url, media_type=media_type,
-                    detected_category=category, analysis_confidence=img_confidence,
-                    evidence_summary=summary,
+                    report_id=report.id, 
+                    media_url=media_url, 
+                    media_type=media_type,
+                    detected_category=result.prediction, 
+                    analysis_confidence=result.confidence,
+                    evidence_summary=result.metadata.get("evidence_summary", ""),
                 ))
 
         db.commit()
@@ -166,7 +178,9 @@ class IngestionService:
                     report.longitude - box_deg, report.longitude + box_deg))
             )
         nearby_recent = dup_query.all()
-        dup_results = find_duplicates(nearby_recent)
+        
+        detector = get_duplicate_detector()
+        dup_results = await detector.find_duplicates(nearby_recent)
 
         for d in dup_results:
             r = db.get(models.Report, d["report_id"])  # SQLAlchemy 2.0 style
@@ -230,7 +244,7 @@ class IngestionService:
                 .limit(5).all()
             )
 
-        return fusion_engine.fuse_cluster(db, this_report_cluster, nearby_weather)
+        return await fusion_engine.fuse_cluster(db, this_report_cluster, nearby_weather)
 
     # ------------------------------------------------------------------ #
     # Stage 6 — Alert dispatch                                            #

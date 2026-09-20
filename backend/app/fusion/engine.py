@@ -24,7 +24,7 @@ from collections import Counter
 
 from ..core import config
 from .. import models
-from ..geo.postgis import sync_event_geom
+from ..geo.registry import get_spatial_store
 from ..fusion.severity import compute_severity
 from ..fusion.confidence import compute_breakdown, compute_confidence
 from ..geo.risk_zones import get_risk_zones, check_intersection
@@ -35,7 +35,39 @@ def _event_code(db) -> str:
     return f"EVT-{1000 + count + 1}"
 
 
-def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObservation] | None = None):
+def _prepare_breakdown_inputs(reports: list[models.Report], weather_obs: list[models.WeatherObservation]) -> dict:
+    return {
+        "texts": [r.text or "" for r in reports],
+        "coords": [(r.latitude, r.longitude) for r in reports if r.latitude is not None],
+        "timestamps": [r.timestamp for r in reports],
+        "weather_obs": weather_obs,
+        "source_types": [r.source_type for r in reports],
+        "source_names": [r.source_name for r in reports],
+        "media_counts": [len(r.media_items) for r in reports],
+        "report_count": len(reports),
+    }
+
+
+def _compute_majority_attributes(reports: list[models.Report]) -> tuple[str, float|None, float|None, str|None, str|None]:
+    type_counts = Counter(r.event_type for r in reports if r.event_type)
+    event_type = type_counts.most_common(1)[0][0] if type_counts else "Other"
+
+    lat_vals = [r.latitude for r in reports if r.latitude is not None]
+    lng_vals = [r.longitude for r in reports if r.longitude is not None]
+    lat = sum(lat_vals) / len(lat_vals) if lat_vals else None
+    lng = sum(lng_vals) / len(lng_vals) if lng_vals else None
+    city = Counter(r.city for r in reports if r.city).most_common(1)
+    state = Counter(r.state for r in reports if r.state).most_common(1)
+    return (
+        event_type,
+        lat,
+        lng,
+        city[0][0] if city else None,
+        state[0][0] if state else None,
+    )
+
+
+async def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObservation] | None = None):
     """
     Fuse a cluster of reports into a single Event (creating or updating it).
 
@@ -50,23 +82,8 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
     # ------------------------------------------------------------------ #
     # Build inputs for the pure confidence computation                    #
     # ------------------------------------------------------------------ #
-    texts = [r.text or "" for r in reports]
-    coords = [(r.latitude, r.longitude) for r in reports if r.latitude is not None]
-    timestamps = [r.timestamp for r in reports]
-    source_types = [r.source_type for r in reports]
-    source_names = [r.source_name for r in reports]
-    media_counts = [len(r.media_items) for r in reports]
-
-    breakdown = compute_breakdown(
-        texts=texts,
-        coords=coords,
-        timestamps=timestamps,
-        weather_obs=weather_obs,
-        source_types=source_types,
-        source_names=source_names,
-        media_counts=media_counts,
-        report_count=len(reports),
-    )
+    inputs = _prepare_breakdown_inputs(reports, weather_obs)
+    breakdown = await compute_breakdown(**inputs)
     confidence = compute_confidence(breakdown)
 
     # Pull derived values computed alongside the breakdown
@@ -78,17 +95,7 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
     # ------------------------------------------------------------------ #
     # Majority event type & centroid location                             #
     # ------------------------------------------------------------------ #
-    type_counts = Counter(r.event_type for r in reports if r.event_type)
-    event_type = type_counts.most_common(1)[0][0] if type_counts else "Other"
-
-    lat_vals = [r.latitude for r in reports if r.latitude is not None]
-    lng_vals = [r.longitude for r in reports if r.longitude is not None]
-    lat = sum(lat_vals) / len(lat_vals) if lat_vals else None
-    lng = sum(lng_vals) / len(lng_vals) if lng_vals else None
-    city = Counter(r.city for r in reports if r.city).most_common(1)
-    state = Counter(r.state for r in reports if r.state).most_common(1)
-    city = city[0][0] if city else None
-    state = state[0][0] if state else None
+    event_type, lat, lng, city, state = _compute_majority_attributes(reports)
 
     # ------------------------------------------------------------------ #
     # Severity + risk-zone boost                                          #
@@ -174,7 +181,8 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
         r.processing_status = "FUSED"
 
     db.commit()
-    sync_event_geom(db, event.id, event.latitude, event.longitude)
+    store = get_spatial_store()
+    store.sync_event_geom(db, event.id, event.latitude, event.longitude)
     db.commit()
     db.refresh(event)
     return event

@@ -10,7 +10,7 @@ from ..security.jwt_auth import require_role
 router = APIRouter(tags=["alerts-sources-health"])
 
 
-@router.get("/api/alerts")
+@router.get("/api/v1/alerts")
 def list_alerts(db: Session = Depends(get_db), acknowledged: bool | None = None, level: str | None = None):
     query = db.query(models.Alert)
     if acknowledged is not None:
@@ -24,7 +24,7 @@ def list_alerts(db: Session = Depends(get_db), acknowledged: bool | None = None,
     } for a in rows]}
 
 
-@router.post("/api/alerts/{alert_id}/acknowledge")
+@router.post("/api/v1/alerts/{alert_id}/acknowledge")
 def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), _admin: bool = Depends(require_admin), _role: bool = Depends(require_role("ADMIN"))):
     a = db.query(models.Alert).get(alert_id)
     if a:
@@ -33,7 +33,7 @@ def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), _admin: bool
     return {"ok": True}
 
 
-@router.get("/api/sources")
+@router.get("/api/v1/sources")
 def list_sources(db: Session = Depends(get_db)):
     rows = db.query(models.Source).all()
     return {"items": [{
@@ -53,7 +53,7 @@ def list_datasets(db: Session = Depends(get_db)):
     } for d in rows]}
 
 
-@router.get("/api/audit-logs")
+@router.get("/api/v1/audit-logs")
 def list_audit_logs(db: Session = Depends(get_db), limit: int = 200):
     rows = db.query(models.AuditLog).order_by(models.AuditLog.created_at.desc()).limit(limit).all()
     return {"items": [{
@@ -62,7 +62,7 @@ def list_audit_logs(db: Session = Depends(get_db), limit: int = 200):
     } for a in rows]}
 
 
-@router.get("/api/search")
+@router.get("/api/v1/search")
 def search(q: str, db: Session = Depends(get_db)):
     like = f"%{q}%"
     events = db.query(models.Event).filter(or_(
@@ -80,7 +80,7 @@ def search(q: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/api/health")
+@router.get("/api/v1/health")
 def health(db: Session = Depends(get_db)):
     import datetime as dt
     from ..core import config

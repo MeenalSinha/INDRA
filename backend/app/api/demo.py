@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..demo import simulator
 
-router = APIRouter(prefix="/api/demo", tags=["demo"])
+router = APIRouter(prefix="/api/v1/demo", tags=["demo"])
 
 
 @router.post("/start")

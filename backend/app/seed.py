@@ -10,7 +10,8 @@ import random
 from . import models
 from .core.database import SessionLocal, engine, Base, ensure_schema
 from .demo.scenarios import SEED_EVENTS
-from .ml.reliability import predict as score_source
+from .ai.registry import get_trust_assessor
+import asyncio
 
 SOURCE_DEFS = [
     ("IMD Government Feed", "government"),
@@ -60,7 +61,7 @@ def _seed_users(db):
     db.commit()
 
 
-def run_seed():
+async def run_seed():
     Base.metadata.create_all(bind=engine)
     ensure_schema()
     db = SessionLocal()
@@ -73,8 +74,9 @@ def run_seed():
 
         sources = {}
         for name, stype in SOURCE_DEFS:
-            result = score_source(stype, verification_history_count=random.randint(5, 60), metadata_completeness=0.75)
-            score, trust = result["score"], result["trust_level"]
+            trust_assessor = get_trust_assessor()
+            result = await trust_assessor.predict(stype, verification_history_count=random.randint(5, 60), metadata_completeness=0.75)
+            score, trust = result.confidence, result.prediction
             src = models.Source(name=name, source_type=stype, trust_level=trust, reliability_score=score,
                                  verification_history_count=random.randint(5, 60))
             db.add(src)
@@ -198,11 +200,12 @@ def run_seed():
 
         # Backfill PostGIS geometry for every seeded row with coordinates
         # (Live Mode only -- no-op in Demo Mode).
-        from .geo.postgis import sync_report_geom, sync_event_geom
+        from .geo.registry import get_spatial_store
+        store = get_spatial_store()
         for r in db.query(models.Report).filter(models.Report.latitude.isnot(None)).all():
-            sync_report_geom(db, r.id, r.latitude, r.longitude)
+            store.sync_report_geom(db, r.id, r.latitude, r.longitude)
         for e in db.query(models.Event).filter(models.Event.latitude.isnot(None)).all():
-            sync_event_geom(db, e.id, e.latitude, e.longitude)
+            store.sync_event_geom(db, e.id, e.latitude, e.longitude)
         db.commit()
     finally:
         db.close()

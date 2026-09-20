@@ -10,19 +10,19 @@ def client():
 
 
 def test_health_endpoint(client):
-    r = client.get("/api/health")
+    r = client.get("/api/v1/health")
     assert r.status_code == 200
     assert r.json()["api"] == "ONLINE"
 
 
 def test_seed_data_present(client):
-    r = client.get("/api/events")
+    r = client.get("/api/v1/events")
     assert r.status_code == 200
     assert r.json()["total"] >= 9
 
 
 def test_dashboard_summary(client):
-    r = client.get("/api/analytics/summary")
+    r = client.get("/api/v1/analytics/summary")
     assert r.status_code == 200
     body = r.json()
     assert "total_reports" in body and "verified_events" in body
@@ -40,7 +40,7 @@ def test_single_live_report_classifies_but_does_not_yet_fuse(client):
         "text": "Isolated report: light drizzle near Rajendra Nagar, Patna",
         "city": "Patna", "state": "Bihar", "hashtags": [],
     }
-    r = client.post("/api/reports", json=payload)
+    r = client.post("/api/v1/reports", json=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["event_type"] in ("Heavy Rainfall", "Other")
@@ -64,7 +64,7 @@ def test_multiple_similar_reports_fuse_into_one_new_event(client):
             "text": text, "city": "Patna", "state": "Bihar",
             "latitude": 25.601 + i * 0.001, "longitude": 85.145 + i * 0.001,
         }
-        r = client.post("/api/reports", json=payload)
+        r = client.post("/api/v1/reports", json=payload)
         assert r.status_code == 200
         body = r.json()
         assert body["event_type"] == "Urban Flooding"
@@ -76,16 +76,16 @@ def test_multiple_similar_reports_fuse_into_one_new_event(client):
     assert event_ids[1] is not None
     assert event_ids[1] == event_ids[2]
 
-    seeded_patna_event = next(e for e in client.get("/api/events").json()["items"] if e["event_code"] == "EVT-1001")
+    seeded_patna_event = next(e for e in client.get("/api/v1/events").json()["items"] if e["event_code"] == "EVT-1001")
     assert event_ids[1] != seeded_patna_event["id"], "live reports must not merge into the pre-seeded/already-verified Patna event"
 
-    new_event = client.get(f"/api/events/{event_ids[1]}").json()
+    new_event = client.get(f"/api/v1/events/{event_ids[1]}").json()
     assert new_event["verification_status"] in ("UNVERIFIED", "UNDER_REVIEW", "PROBABLE")
     assert new_event["report_count"] >= 2
 
     # and the admin-verification action is genuinely available (not
     # already pre-verified from seed data)
-    verify = client.post(f"/api/events/{event_ids[1]}/verify", json={"reason": "confirmed by field team"})
+    verify = client.post(f"/api/v1/events/{event_ids[1]}/verify", json={"reason": "confirmed by field team"})
     assert verify.status_code == 200
     assert verify.json()["verification_status"] == "VERIFIED"
 
@@ -109,16 +109,16 @@ def test_alert_fires_once_on_transition_to_critical_not_every_update(client):
     ]
     event_id = None
     for i, text in enumerate(texts):
-        r = client.post("/api/reports", json={**base_payload, "text": text,
+        r = client.post("/api/v1/reports", json={**base_payload, "text": text,
                                                 "latitude": 19.09 + i * 0.0005, "longitude": 72.90 + i * 0.0005})
         body = r.json()
         if body["event_id"]:
             event_id = body["event_id"]
 
     assert event_id is not None
-    event = client.get(f"/api/events/{event_id}").json()
+    event = client.get(f"/api/v1/events/{event_id}").json()
 
-    alerts = client.get("/api/alerts", params={"level": "CRITICAL"}).json()["items"]
+    alerts = client.get("/api/v1/alerts", params={"level": "CRITICAL"}).json()["items"]
     matching = [a for a in alerts if a["event_id"] == event_id]
     if event["severity"] == "CRITICAL":
         assert len(matching) == 1, f"expected exactly one CRITICAL alert for one event, got {len(matching)}"
@@ -139,54 +139,54 @@ def test_event_description_stays_in_sync_with_report_count(client):
     ]
     event_id = None
     for i, text in enumerate(texts):
-        r = client.post("/api/reports", json={**base_payload, "text": text,
+        r = client.post("/api/v1/reports", json={**base_payload, "text": text,
                                                 "latitude": 13.05 + i * 0.001, "longitude": 80.28 + i * 0.001})
         body = r.json()
         if body["event_id"]:
             event_id = body["event_id"]
 
     assert event_id is not None
-    event = client.get(f"/api/events/{event_id}").json()
+    event = client.get(f"/api/v1/events/{event_id}").json()
     assert str(event["report_count"]) in event["description"], (
         f"description ({event['description']!r}) does not mention the current report_count ({event['report_count']})"
     )
 
 
 def test_verification_workflow_end_to_end(client):
-    events = client.get("/api/events").json()["items"]
+    events = client.get("/api/v1/events").json()["items"]
     target = next(e for e in events if e["verification_status"] in ("UNDER_REVIEW", "PROBABLE"))
-    r = client.post(f"/api/events/{target['id']}/verify", json={"admin_name": "Test Admin", "reason": "confirmed"})
+    r = client.post(f"/api/v1/events/{target['id']}/verify", json={"admin_name": "Test Admin", "reason": "confirmed"})
     assert r.status_code == 200
     assert r.json()["verification_status"] == "VERIFIED"
-    audit = client.get("/api/audit-logs").json()["items"]
+    audit = client.get("/api/v1/audit-logs").json()["items"]
     assert any(a["action"] == "VERIFY" for a in audit)
 
 
 def test_reject_workflow(client):
-    events = client.get("/api/events").json()["items"]
+    events = client.get("/api/v1/events").json()["items"]
     target = next(e for e in events if e["verification_status"] not in ("VERIFIED", "REJECTED"))
-    r = client.post(f"/api/events/{target['id']}/reject", json={"admin_name": "Test Admin", "reason": "insufficient evidence"})
+    r = client.post(f"/api/v1/events/{target['id']}/reject", json={"admin_name": "Test Admin", "reason": "insufficient evidence"})
     assert r.status_code == 200
     assert r.json()["verification_status"] == "REJECTED"
 
 
 def test_mark_report_duplicate(client):
-    reports = client.get("/api/reports?limit=2").json()["items"]
-    r = client.post(f"/api/reports/{reports[1]['id']}/duplicate", json={"duplicate_of": reports[0]["id"]})
+    reports = client.get("/api/v1/reports?limit=2").json()["items"]
+    r = client.post(f"/api/v1/reports/{reports[1]['id']}/duplicate", json={"duplicate_of": reports[0]["id"]})
     assert r.status_code == 200
     assert r.json()["duplicate_status"] == "LIKELY_DUPLICATE"
 
 
 def test_demo_mode_lifecycle(client):
-    r = client.post("/api/demo/start")
+    r = client.post("/api/v1/demo/start")
     assert r.status_code == 200
-    status = client.get("/api/demo/status").json()
+    status = client.get("/api/v1/demo/status").json()
     assert "running" in status
-    r = client.post("/api/demo/reset")
+    r = client.post("/api/v1/demo/reset")
     assert r.status_code == 200
 
 
 def test_search(client):
-    r = client.get("/api/search", params={"q": "Patna"})
+    r = client.get("/api/v1/search", params={"q": "Patna"})
     assert r.status_code == 200
     assert "events" in r.json()

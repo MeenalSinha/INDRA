@@ -9,7 +9,7 @@ from ..realtime import pubsub
 from ..security.auth import require_admin
 from ..security.jwt_auth import require_role
 
-router = APIRouter(prefix="/api/events", tags=["events"])
+router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
 
 def _serialize(e: models.Event, detailed: bool = False):

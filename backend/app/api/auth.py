@@ -6,7 +6,7 @@ from ..core.database import get_db
 from .. import models
 from ..security.auth import require_admin
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 VALID_ROLES = {"ADMIN", "ANALYST", "VIEWER"}
 

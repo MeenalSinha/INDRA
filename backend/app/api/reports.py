@@ -9,7 +9,7 @@ from ..security.auth import require_admin
 from ..security.jwt_auth import require_role
 from ..services.report_service import report_service
 
-router = APIRouter(prefix="/api/reports", tags=["reports"])
+router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 
 def _serialize(r: models.Report):

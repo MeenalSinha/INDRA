@@ -34,6 +34,7 @@ class User(Base):
     """
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
+    tenant_id = Column(String, nullable=True, index=True)  # Multi-tenant placeholder
     username = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(String, nullable=False)  # ADMIN, ANALYST, VIEWER
@@ -60,6 +61,7 @@ class Source(Base):
 class Report(Base):
     __tablename__ = "reports"
     id = Column(Integer, primary_key=True)
+    tenant_id = Column(String, nullable=True, index=True)  # Multi-tenant placeholder
     source_id = Column(Integer, ForeignKey("sources.id"))
     source_name = Column(String)
     source_type = Column(String)
@@ -144,6 +146,7 @@ class WeatherObservation(Base):
 class Event(Base):
     __tablename__ = "events"
     id = Column(Integer, primary_key=True)
+    tenant_id = Column(String, nullable=True, index=True)  # Multi-tenant placeholder
     event_code = Column(String, unique=True)  # e.g. EVT-1024
     event_type = Column(String, index=True)
     title = Column(String)

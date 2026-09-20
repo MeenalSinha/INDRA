@@ -123,7 +123,7 @@ async def reset(db):
     db.close()
 
     from .. import seed as seed_module
-    seed_module.run_seed()
+    await seed_module.run_seed()
 
     await pubsub.publish("demo.reset", {})
     return state.status()

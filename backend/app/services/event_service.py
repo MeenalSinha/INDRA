@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..repositories import event_repo, report_repo
 from ..geo.utils import haversine_km
-from ..core import config
+from ..geo.registry import get_spatial_store
 
 class EventService:
     @staticmethod
@@ -43,17 +43,8 @@ class EventService:
 
     @staticmethod
     def get_events_nearby(db: Session, lat: float, lng: float, radius_km: float = 50) -> tuple[int, List[models.Event]]:
-        if config.IS_POSTGRES:
-            from ..geo.postgis import events_within_radius_postgis
-            ids = events_within_radius_postgis(db, lat, lng, radius_km)
-            events_by_id = {e.id: e for e in db.query(models.Event).filter(models.Event.id.in_(ids)).all()}
-            ordered = [events_by_id[i] for i in ids if i in events_by_id]
-            return len(ordered), ordered
-
-        candidates = db.query(models.Event).filter(models.Event.latitude.isnot(None)).all()
-        within = [e for e in candidates if haversine_km(lat, lng, e.latitude, e.longitude) <= radius_km]
-        within.sort(key=lambda e: haversine_km(lat, lng, e.latitude, e.longitude))
-        return len(within), within
+        store = get_spatial_store()
+        return store.events_within_radius(db, lat, lng, radius_km)
 
     @staticmethod
     def get_events_bbox(db: Session, min_lat: float, min_lng: float, max_lat: float, max_lng: float) -> tuple[int, List[models.Event]]:

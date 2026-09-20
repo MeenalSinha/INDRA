@@ -1,19 +1,9 @@
-"""
-Weather event classification.
-
-REAL IMPLEMENTATION (runs locally, no external model download): a
-transparent lexicon + scoring classifier. Each event category has a set of
-weighted trigger terms; the report text is normalized and scored against
-every category, the top category is returned with a confidence derived from
-term coverage and match strength. This is intentionally explainable (judges
-can see exactly why a report was classified a certain way) rather than a
-black box.
-
-FUTURE PRODUCTION INTEGRATION: swap `predict()` for a fine-tuned
-transformer (e.g. a Hugging Face sequence-classification head trained on
-labelled Indian weather report text) behind the same function signature.
-"""
 import re
+import time
+from typing import Optional
+
+from ..interfaces import TextClassifier
+from ..models import AIResult
 
 CATEGORIES = {
     "Urban Flooding": {
@@ -73,34 +63,50 @@ CATEGORIES = {
     },
 }
 
-
 def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9\s#]", " ", (text or "").lower())
 
 
-def predict(text: str, hashtags=None) -> dict:
-    """Return structured classification results for a report's free text."""
-    norm = _normalize(text)
-    tag_text = " ".join(h.lower().lstrip("#") for h in (hashtags or []))
-    haystack = f"{norm} {tag_text}"
+class RuleBasedTextClassifier(TextClassifier):
+    """
+    Transparent lexicon + scoring classifier. Each event category has a set of
+    weighted trigger terms. Explainable and fast.
+    """
+    
+    async def predict(self, text: str, hashtags: Optional[list[str]] = None) -> AIResult:
+        start_time = time.time()
+        
+        norm = _normalize(text)
+        tag_text = " ".join(h.lower().lstrip("#") for h in (hashtags or []))
+        haystack = f"{norm} {tag_text}"
 
-    scores = {}
-    for category, cfg in CATEGORIES.items():
-        matched_weight = 0.0
-        matches = 0
-        for term, weight in cfg["terms"].items():
-            if term in haystack:
-                matched_weight += weight
-                matches += 1
-        if matches:
-            # Confidence blends match strength with a small bonus for
-            # multiple corroborating terms, capped at 0.97 (never claim
-            # certainty).
-            confidence = min(0.97, 0.45 + matched_weight * 0.22 + 0.05 * (matches - 1))
-            scores[category] = round(confidence, 2)
+        scores = {}
+        for category, cfg in CATEGORIES.items():
+            matched_weight = 0.0
+            matches = 0
+            for term, weight in cfg["terms"].items():
+                if term in haystack:
+                    matched_weight += weight
+                    matches += 1
+            if matches:
+                confidence = min(0.97, 0.45 + matched_weight * 0.22 + 0.05 * (matches - 1))
+                scores[category] = round(confidence, 2)
 
-    if not scores:
-        return {"category": "Other", "confidence": 0.30}
+        if not scores:
+            best_category = "Other"
+            confidence = 0.30
+        else:
+            best_category = max(scores, key=scores.get)
+            confidence = scores[best_category]
+            
+        processing_time = (time.time() - start_time) * 1000
 
-    best_category = max(scores, key=scores.get)
-    return {"category": best_category, "confidence": scores[best_category]}
+        return AIResult(
+            prediction=best_category,
+            confidence=confidence,
+            provider="RuleBasedTextClassifier",
+            model_version="1.0.0",
+            processing_time_ms=processing_time,
+            fallback_triggered=False,
+            metadata={"all_scores": scores}
+        )

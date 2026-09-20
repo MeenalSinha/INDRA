@@ -39,7 +39,7 @@ def test_demo_users_seeded_in_database():
 
 def test_login_checks_database_user():
     """POST /api/auth/login returns a JWT when credentials match the DB."""
-    r = client.post("/api/auth/login", json={"username": "admin", "password": "indra-admin-demo"})
+    r = client.post("/api/v1/auth/login", json={"username": "admin", "password": "indra-admin-demo"})
     assert r.status_code == 200
     body = r.json()
     assert "access_token" in body
@@ -47,7 +47,7 @@ def test_login_checks_database_user():
 
 
 def test_wrong_password_rejected():
-    r = client.post("/api/auth/login", json={"username": "admin", "password": "wrong-pass"})
+    r = client.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong-pass"})
     assert r.status_code == 401
 
 
@@ -58,11 +58,11 @@ def test_create_user_endpoint_requires_admin_role(monkeypatch):
 
     # Viewer token should be rejected (403)
     viewer_token = client.post(
-        "/api/auth/login", json={"username": "viewer", "password": "indra-viewer-demo"}
+        "/api/v1/auth/login", json={"username": "viewer", "password": "indra-viewer-demo"}
     ).json()["access_token"]
 
     r = client.post(
-        "/api/auth/users",
+        "/api/v1/auth/users",
         json={"username": "newuser", "password": "newpass123", "role": "ANALYST"},
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
@@ -73,7 +73,7 @@ def test_create_user_and_login():
     """Admin can create a new user; new user can log in immediately."""
     # Create via API (admin token header, REQUIRE_ADMIN_TOKEN=false by default)
     r = client.post(
-        "/api/auth/users",
+        "/api/v1/auth/users",
         json={"username": "testanalyst_u6", "password": "t3stP@ssw0rd!", "role": "ANALYST"},
     )
     assert r.status_code == 200, r.text
@@ -83,7 +83,7 @@ def test_create_user_and_login():
 
     # New user can now log in
     r2 = client.post(
-        "/api/auth/login", json={"username": "testanalyst_u6", "password": "t3stP@ssw0rd!"}
+        "/api/v1/auth/login", json={"username": "testanalyst_u6", "password": "t3stP@ssw0rd!"}
     )
     assert r2.status_code == 200
     assert r2.json()["role"] == "ANALYST"
@@ -92,7 +92,7 @@ def test_create_user_and_login():
 def test_create_user_duplicate_rejected():
     """Creating an account with an existing username returns 409."""
     r = client.post(
-        "/api/auth/users",
+        "/api/v1/auth/users",
         json={"username": "admin", "password": "somepass", "role": "ANALYST"},
     )
     assert r.status_code == 409
@@ -101,7 +101,7 @@ def test_create_user_duplicate_rejected():
 def test_create_user_invalid_role():
     """Invalid role returns 422."""
     r = client.post(
-        "/api/auth/users",
+        "/api/v1/auth/users",
         json={"username": "badroleu6", "password": "pass", "role": "SUPERUSER"},
     )
     assert r.status_code == 422
@@ -109,7 +109,7 @@ def test_create_user_invalid_role():
 
 def test_list_users_endpoint():
     """GET /api/auth/users returns all accounts, no password field."""
-    r = client.get("/api/auth/users")
+    r = client.get("/api/v1/auth/users")
     assert r.status_code == 200
     items = r.json()["items"]
     assert any(u["username"] == "admin" for u in items)

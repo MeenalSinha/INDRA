@@ -6,9 +6,9 @@ demo/scenarios.py media_url strings.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from ..storage import save_media
-from ..ml import image as image_ml
+from ..ai.registry import get_image_analyzer
 
-router = APIRouter(prefix="/api/media", tags=["media"])
+router = APIRouter(prefix="/api/v1/media", tags=["media"])
 
 ALLOWED_CONTENT_TYPES = {
     "image/jpeg", "image/png", "image/webp", "image/gif",
@@ -30,7 +30,9 @@ async def upload_media(file: UploadFile = File(...), declared_category: str | No
 
     media_type = "video" if file.content_type.startswith("video/") else "image"
     url = save_media(contents, file.filename or "upload", file.content_type)
-    category, confidence, summary = image_ml.analyze(declared_category, media_type, image_bytes=contents)
+    analyzer = get_image_analyzer()
+    result = await analyzer.analyze(contents, media_type)
+    category, confidence, summary = result.prediction, result.confidence, result.metadata.get("evidence_summary", "")
 
     return {
         "media_url": url, "media_type": media_type,
