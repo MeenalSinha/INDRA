@@ -10,7 +10,7 @@ without blocking the API.
 import asyncio
 import datetime as dt
 from .. import models
-from ..database import SessionLocal
+from ..core.database import SessionLocal
 from ..ingestion.adapters import ingest_report
 from ..realtime import pubsub
 from .scenarios import patna_flood_timeline
@@ -116,7 +116,7 @@ async def reset(db):
     state.processed = 0
     state.total = 0
 
-    from ..database import Base
+    from ..core.database import Base
     for table in reversed(Base.metadata.sorted_tables):
         db.execute(table.delete())
     db.commit()
@@ -127,3 +127,4 @@ async def reset(db):
 
     await pubsub.publish("demo.reset", {})
     return state.status()
+

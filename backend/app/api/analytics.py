@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from .. import models
-from ..database import get_db
+from ..core.database import get_db
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -86,3 +86,4 @@ def verification_rate(db: Session = Depends(get_db)):
 def source_contribution(db: Session = Depends(get_db)):
     rows = db.query(models.Report.source_type, func.count(models.Report.id)).group_by(models.Report.source_type).all()
     return {"items": [{"source_type": t, "count": c} for t, c in rows]}
+

@@ -3,7 +3,7 @@ Severity engine. Produces LOW/MODERATE/HIGH/CRITICAL plus a human-readable
 list of reasons, so the UI can show real reasoning ("127 reports", "High
 rainfall anomaly") instead of a bare label.
 """
-from .. import config
+from ..core import config
 
 HIGH_IMPACT_TYPES = {"Urban Flooding", "Cyclone", "Hailstorm"}
 MODERATE_IMPACT_TYPES = {"Heavy Rainfall", "Thunderstorm", "Dust Storm", "Strong Winds"}
@@ -63,3 +63,4 @@ def compute_severity(event_type: str, report_count: int, spatial_spread_km: floa
             reasons.append("Limited corroborating evidence so far")
 
     return severity, reasons
+

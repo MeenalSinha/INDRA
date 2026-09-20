@@ -90,7 +90,7 @@ def test_jwt_login_and_role_enforcement(monkeypatch):
     enabled, only ADMIN-role tokens can verify an event, and login with
     the wrong password is rejected."""
     from app.security import jwt_auth
-    from app import config as config_module
+    from app.core import config as config_module
 
     # wrong password
     assert jwt_auth.authenticate("admin", "wrong-password") is None
@@ -134,3 +134,4 @@ def test_demo_credentials_endpoint():
     assert r.status_code == 200
     roles = {a["role"] for a in r.json()["accounts"]}
     assert roles == {"ADMIN", "ANALYST", "VIEWER"}
+

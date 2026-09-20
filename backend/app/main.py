@@ -3,8 +3,8 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from . import config
-from .database import Base, engine, ensure_schema
+from .core import config
+from .core.database import Base, engine, ensure_schema
 from .seed import run_seed
 from .api import reports, events, analytics, alerts, demo, media, auth as auth_api
 from .realtime.manager import websocket_endpoint
@@ -69,7 +69,7 @@ async def on_startup_async():
 
     # §5: Start OWM weather poller (no-op if OWM_API_KEY unset)
     from .ingestion.weather_poller import run_weather_poller
-    from .database import SessionLocal
+    from .core.database import SessionLocal
     import asyncio
     asyncio.create_task(run_weather_poller(SessionLocal))
 
@@ -109,3 +109,4 @@ async def ws_events(websocket: WebSocket):
 # `uvicorn app.main:app` alone is enough to open http://localhost:8000/.
 if _frontend_dist and os.path.isdir(_frontend_dist):
     app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
+

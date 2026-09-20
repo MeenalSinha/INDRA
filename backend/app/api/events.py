@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from .. import models, schemas
-from ..database import get_db
+from ..core.database import get_db
 from ..verification import service as verification_service
+from ..services.event_service import event_service
 from ..realtime import pubsub
 from ..security.auth import require_admin
 from ..security.jwt_auth import require_role
@@ -44,66 +45,38 @@ def list_events(
     limit: int = Query(200, le=1000),
     offset: int = 0,
 ):
-    import datetime as dt
-    query = db.query(models.Event)
-    if date_from:
-        query = query.filter(models.Event.start_time >= dt.datetime.fromisoformat(date_from))
-    if date_to:
-        query = query.filter(models.Event.start_time <= dt.datetime.fromisoformat(date_to))
-    if event_type:
-        query = query.filter(models.Event.event_type == event_type)
-    if state:
-        query = query.filter(models.Event.state == state)
-    if city:
-        query = query.filter(models.Event.city == city)
-    if severity:
-        query = query.filter(models.Event.severity == severity)
-    if verification_status:
-        query = query.filter(models.Event.verification_status == verification_status)
-    if q:
-        like = f"%{q}%"
-        query = query.filter(or_(models.Event.title.ilike(like), models.Event.city.ilike(like),
-                                   models.Event.event_code.ilike(like)))
-    total = query.count()
-    rows = query.order_by(models.Event.last_updated.desc()).offset(offset).limit(limit).all()
+    total, rows = event_service.list_events(
+        db,
+        event_type=event_type,
+        state=state,
+        city=city,
+        severity=severity,
+        verification_status=verification_status,
+        q=q,
+        date_from=date_from,
+        date_to=date_to,
+        skip=offset,
+        limit=limit
+    )
     return {"total": total, "items": [_serialize(e) for e in rows]}
 
 
 @router.get("/nearby")
 def events_nearby(lat: float, lng: float, radius_km: float = 50, db: Session = Depends(get_db)):
-    """Radius search -- real PostGIS ST_DWithin (geography cast, GIST
-    index) in Live Mode; Python haversine over the candidate set in Demo
-    Mode, where there is no spatial engine to delegate to."""
-    from .. import config
-    if config.IS_POSTGRES:
-        from ..geo.postgis import events_within_radius_postgis
-        ids = events_within_radius_postgis(db, lat, lng, radius_km)
-        events_by_id = {e.id: e for e in db.query(models.Event).filter(models.Event.id.in_(ids)).all()}
-        ordered = [events_by_id[i] for i in ids if i in events_by_id]
-        return {"total": len(ordered), "items": [_serialize(e) for e in ordered]}
-
-    from ..geo.utils import haversine_km
-    candidates = db.query(models.Event).filter(models.Event.latitude.isnot(None)).all()
-    within = [e for e in candidates if haversine_km(lat, lng, e.latitude, e.longitude) <= radius_km]
-    within.sort(key=lambda e: haversine_km(lat, lng, e.latitude, e.longitude))
-    return {"total": len(within), "items": [_serialize(e) for e in within]}
+    total, rows = event_service.get_events_nearby(db, lat, lng, radius_km)
+    return {"total": total, "items": [_serialize(e) for e in rows]}
 
 
 @router.get("/bbox")
 def events_bbox(min_lat: float, min_lng: float, max_lat: float, max_lng: float, db: Session = Depends(get_db)):
     """Bounding-box search."""
-    rows = (
-        db.query(models.Event)
-        .filter(models.Event.latitude >= min_lat, models.Event.latitude <= max_lat)
-        .filter(models.Event.longitude >= min_lng, models.Event.longitude <= max_lng)
-        .all()
-    )
-    return {"total": len(rows), "items": [_serialize(e) for e in rows]}
+    total, rows = event_service.get_events_bbox(db, min_lat, min_lng, max_lat, max_lng)
+    return {"total": total, "items": [_serialize(e) for e in rows]}
 
 
 @router.get("/{event_id}")
 def get_event(event_id: int, db: Session = Depends(get_db)):
-    e = db.query(models.Event).get(event_id)
+    e = event_service.get_event(db, event_id)
     if not e:
         raise HTTPException(404, "Event not found")
     return _serialize(e, detailed=True)
@@ -111,25 +84,10 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{event_id}/evidence")
 def get_event_evidence(event_id: int, db: Session = Depends(get_db)):
-    e = db.query(models.Event).get(event_id)
-    if not e:
+    evidence = event_service.get_event_evidence(db, event_id)
+    if not evidence:
         raise HTTPException(404, "Event not found")
-    report_ids = [er.report_id for er in e.event_reports]
-    reports = db.query(models.Report).filter(models.Report.id.in_(report_ids)).all()
-    media = db.query(models.Media).filter(models.Media.report_id.in_(report_ids)).all()
-    weather = (
-        db.query(models.WeatherObservation)
-        .filter(models.WeatherObservation.city == e.city)
-        .order_by(models.WeatherObservation.timestamp.desc())
-        .limit(10).all()
-    )
-    return {
-        "reports": len(reports),
-        "independent_sources": len({r.source_name for r in reports}),
-        "images": len(media),
-        "weather_observations": len(weather),
-        "media": [{"url": m.media_url, "category": m.detected_category, "confidence": m.analysis_confidence} for m in media],
-    }
+    return evidence
 
 
 @router.post("/{event_id}/verify")
@@ -175,3 +133,4 @@ async def change_severity(event_id: int, payload: schemas.SeverityChangeIn, db: 
         raise HTTPException(404, "Event not found")
     await pubsub.publish("event.updated", {"event_id": e.id, "severity": e.severity})
     return _serialize(e, detailed=True)
+

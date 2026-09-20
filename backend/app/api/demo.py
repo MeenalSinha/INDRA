@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from ..database import get_db
+from ..core.database import get_db
 from ..demo import simulator
 
 router = APIRouter(prefix="/api/demo", tags=["demo"])
@@ -24,3 +24,4 @@ async def reset_demo(db: Session = Depends(get_db)):
 @router.get("/status")
 def demo_status():
     return simulator.state.status()
+

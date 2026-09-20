@@ -15,110 +15,72 @@ transparent, itemized confidence breakdown:
 Each factor is 0..1 and the final confidence is a weighted blend -- never
 an opaque number. `evidence_count` sums independent reports + weather
 observations + images, matching the "Evidence:" panel in the product spec.
+
+Confidence math lives in fusion/confidence.py (pure, DB-free, unit-testable).
+Event persistence uses SQLAlchemy 2.0-style db.get() throughout.
 """
 import datetime as dt
 from collections import Counter
 
-from .. import config, models
-from ..geo.utils import haversine_km
+from ..core import config
+from .. import models
 from ..geo.postgis import sync_event_geom
-from ..ml.embeddings import pairwise_similarity
-from ..ml.reliability import predict as score_source
-from .severity import compute_severity
+from ..fusion.severity import compute_severity
+from ..fusion.confidence import compute_breakdown, compute_confidence
 from ..geo.risk_zones import get_risk_zones, check_intersection
 
-WEIGHTS = {
-    "semantic_similarity": 0.20,
-    "geo_proximity": 0.20,
-    "time_proximity": 0.15,
-    "weather_agreement": 0.20,
-    "source_reliability": 0.10,
-    "independent_evidence": 0.15,
-}
 
-
-def _event_code(db):
+def _event_code(db) -> str:
     count = db.query(models.Event).count()
     return f"EVT-{1000 + count + 1}"
-
-
-def _spatial_spread_km(reports):
-    pts = [(r.latitude, r.longitude) for r in reports if r.latitude is not None]
-    if len(pts) < 2:
-        return 0.0
-    max_d = 0.0
-    for i in range(len(pts)):
-        for j in range(i + 1, len(pts)):
-            max_d = max(max_d, haversine_km(*pts[i], *pts[j]))
-    return max_d
 
 
 def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObservation] | None = None):
     """
     Fuse a cluster of reports into a single Event (creating or updating it).
-    Returns the Event ORM object.
+
+    Public signature is stable — callers and tests must not need to change.
+    Returns the Event ORM object, or None if report_ids resolves to nothing.
     """
     reports = db.query(models.Report).filter(models.Report.id.in_(report_ids)).all()
     if not reports:
         return None
     weather_obs = weather_obs or []
 
-    # --- semantic similarity: mean pairwise cosine similarity of text ----
+    # ------------------------------------------------------------------ #
+    # Build inputs for the pure confidence computation                    #
+    # ------------------------------------------------------------------ #
     texts = [r.text or "" for r in reports]
-    if len(texts) >= 2:
-        sim_matrix = pairwise_similarity(texts)
-        vals = [sim_matrix[i][j] for i in range(len(texts)) for j in range(i + 1, len(texts))]
-        semantic_similarity = sum(vals) / len(vals) if vals else 0.5
-    else:
-        semantic_similarity = 0.6  # single report: neutral-ish, more evidence needed
-
-    # --- geo proximity: tighter cluster => higher score ------------------
-    spread_km = _spatial_spread_km(reports)
-    geo_proximity = max(0.1, min(1.0, 1 - (spread_km / (config.CLUSTER_EPS_KM * 2))))
-
-    # --- time proximity ----------------------------------------------------
+    coords = [(r.latitude, r.longitude) for r in reports if r.latitude is not None]
     timestamps = [r.timestamp for r in reports]
-    time_spread_min = (max(timestamps) - min(timestamps)).total_seconds() / 60.0 if len(timestamps) > 1 else 0
-    time_proximity = max(0.1, min(1.0, 1 - (time_spread_min / (config.DUPLICATE_TIME_WINDOW_MIN * 3))))
+    source_types = [r.source_type for r in reports]
+    source_names = [r.source_name for r in reports]
+    media_counts = [len(r.media_items) for r in reports]
 
-    # --- weather agreement: any anomalous nearby observation? -------------
-    anomaly_hits = [w for w in weather_obs if w.is_anomaly]
-    weather_agreement = 0.9 if anomaly_hits else (0.55 if weather_obs else 0.35)
+    breakdown = compute_breakdown(
+        texts=texts,
+        coords=coords,
+        timestamps=timestamps,
+        weather_obs=weather_obs,
+        source_types=source_types,
+        source_names=source_names,
+        media_counts=media_counts,
+        report_count=len(reports),
+    )
+    confidence = compute_confidence(breakdown)
 
-    # --- source reliability: average across contributing sources ----------
-    reliability_scores = []
-    for r in reports:
-        result = score_source(
-            r.source_type or "citizen",
-            verification_history_count=0,
-            metadata_completeness=0.8 if (r.latitude and r.text) else 0.4,
-        )
-        s, _ = result["score"], result["trust_level"]
-        reliability_scores.append(s)
-    source_reliability = sum(reliability_scores) / len(reliability_scores) if reliability_scores else 0.5
+    # Pull derived values computed alongside the breakdown
+    spread_km = breakdown.pop("_spread_km")
+    anomaly_count = breakdown.pop("_anomaly_hits")
+    distinct_sources = breakdown.pop("_distinct_sources")
+    total_media = breakdown.pop("_total_media")
 
-    # --- independent evidence: distinct sources + media -------------------
-    distinct_sources = len({r.source_name for r in reports if r.source_name})
-    media_count = sum(len(r.media_items) for r in reports)
-    independent_evidence = min(1.0, 0.10 * distinct_sources + 0.05 * media_count + 0.05 * len(reports))
-    independent_evidence = max(0.2, independent_evidence)
-
-    breakdown = {
-        "semantic_similarity": round(semantic_similarity, 2),
-        "geo_proximity": round(geo_proximity, 2),
-        "time_proximity": round(time_proximity, 2),
-        "weather_agreement": round(weather_agreement, 2),
-        "source_reliability": round(source_reliability, 2),
-        "independent_evidence": round(independent_evidence, 2),
-    }
-    confidence = round(sum(breakdown[k] * WEIGHTS[k] for k in WEIGHTS), 2)
-    confidence = min(0.97, confidence)
-
-    # --- majority event type -----------------------------------------------
+    # ------------------------------------------------------------------ #
+    # Majority event type & centroid location                             #
+    # ------------------------------------------------------------------ #
     type_counts = Counter(r.event_type for r in reports if r.event_type)
     event_type = type_counts.most_common(1)[0][0] if type_counts else "Other"
 
-    # --- centroid location ---------------------------------------------------
     lat_vals = [r.latitude for r in reports if r.latitude is not None]
     lng_vals = [r.longitude for r in reports if r.longitude is not None]
     lat = sum(lat_vals) / len(lat_vals) if lat_vals else None
@@ -128,35 +90,38 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
     city = city[0][0] if city else None
     state = state[0][0] if state else None
 
+    # ------------------------------------------------------------------ #
+    # Severity + risk-zone boost                                          #
+    # ------------------------------------------------------------------ #
     severity, reasons = compute_severity(
         event_type=event_type,
         report_count=len(reports),
         spatial_spread_km=spread_km,
-        has_weather_anomaly=bool(anomaly_hits),
+        has_weather_anomaly=anomaly_count > 0,
         independent_source_count=distinct_sources,
         confidence=confidence,
-        has_image_evidence=media_count > 0,
+        has_image_evidence=total_media > 0,
     )
 
-    # --- risk zones check ----------------------------------------------------
     zones = get_risk_zones(db)
     intersecting_zones = check_intersection(lat, lng, zones)
     if intersecting_zones:
-        # Boost severity and append reason
         if severity != "CRITICAL":
             severity = "CRITICAL" if any(z["risk_level"] == "CRITICAL" for z in intersecting_zones) else "HIGH"
         zone_names = [z["name"] for z in intersecting_zones]
         reasons.append(f"Intersects high-risk zones: {', '.join(zone_names)}")
 
-    # --- find existing event already linked to any of these reports -------
+    # ------------------------------------------------------------------ #
+    # Event lookup / create / update — SQLAlchemy 2.0-style db.get()     #
+    # ------------------------------------------------------------------ #
     existing_link = (
         db.query(models.EventReport)
         .filter(models.EventReport.report_id.in_([r.id for r in reports]))
         .first()
     )
-    event = db.query(models.Event).get(existing_link.event_id) if existing_link else None
+    event = db.get(models.Event, existing_link.event_id) if existing_link else None
 
-    now = dt.datetime.utcnow()
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     if event is None:
         event = models.Event(
             event_code=_event_code(db),
@@ -175,7 +140,7 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
         timeline.append({"time": now.isoformat(), "label": f"Fusion updated ({len(reports)} reports in cluster)"})
         event.timeline = timeline
 
-    # Recomputed on every fusion call (not just at creation) -- a stale
+    # Recomputed on every fusion call (not just at creation) — a stale
     # description showing the report count from the event's first fusion
     # pass while report_count elsewhere had already grown to 99 was found
     # live during the audit's golden-path run.
@@ -191,8 +156,9 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
     event.affected_area_km2 = round(3.14159 * (spread_km / 2) ** 2, 1) if spread_km else None
     event.report_count = len(reports)
     event.independent_source_count = distinct_sources
-    event.evidence_count = len(reports) + len(weather_obs) + media_count
+    event.evidence_count = len(reports) + len(weather_obs) + total_media
     event.last_updated = now
+
     if event.verification_status == "UNVERIFIED" and confidence >= 0.6:
         event.verification_status = "PROBABLE"
     elif event.verification_status == "UNVERIFIED" and confidence >= config.FUSION_MIN_CONFIDENCE_FOR_EVENT:
@@ -200,7 +166,7 @@ def fuse_cluster(db, report_ids: list[int], weather_obs: list[models.WeatherObse
 
     db.flush()
 
-    # link reports to event (idempotent)
+    # Link reports to event (idempotent)
     existing_report_ids = {er.report_id for er in event.event_reports}
     for r in reports:
         if r.id not in existing_report_ids:

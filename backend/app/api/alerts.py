@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from .. import models
-from ..database import get_db
+from ..core.database import get_db
 from ..realtime import pubsub
 from ..security.auth import require_admin
 from ..security.jwt_auth import require_role
@@ -83,7 +83,7 @@ def search(q: str, db: Session = Depends(get_db)):
 @router.get("/api/health")
 def health(db: Session = Depends(get_db)):
     import datetime as dt
-    from .. import config
+    from ..core import config
     reports_count = db.query(models.Report).count()
     events_count = db.query(models.Event).count()
 
@@ -133,3 +133,4 @@ def admin_overview(db: Session = Depends(get_db)):
         "pending_verification": pending, "suspicious_reports": suspicious,
         "duplicate_reports": duplicates, "critical_events": critical,
     }
+

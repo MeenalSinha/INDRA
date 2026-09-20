@@ -12,7 +12,7 @@ b1c2d3e4f5a6, backed by a real GIST index (verified via EXPLAIN in the
 audit -- see docs/UPGRADE_AUDIT.md).
 """
 from sqlalchemy import text
-from .. import config
+from ..core import config
 
 
 def sync_report_geom(db, report_id: int, lat, lng):
@@ -53,3 +53,4 @@ def events_within_radius_postgis(db, lat: float, lng: float, radius_km: float):
         {"lng": lng, "lat": lat, "radius_m": radius_km * 1000},
     ).fetchall()
     return [r[0] for r in rows]
+

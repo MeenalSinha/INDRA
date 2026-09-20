@@ -18,8 +18,8 @@ import os
 import jwt
 from fastapi import Header, HTTPException, Depends
 from sqlalchemy.orm import Session
-from .. import config
-from ..database import get_db
+from ..core import config
+from ..core.database import get_db
 
 JWT_SECRET = os.getenv("JWT_SECRET", "indra-demo-jwt-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
@@ -103,7 +103,7 @@ def authenticate(username: str, password: str):
     endpoint. Opens its own DB session so callers without a session can
     still call it — the login endpoint now passes db explicitly via
     authenticate_db(), but this remains for backwards compat with tests."""
-    from ..database import SessionLocal
+    from ..core.database import SessionLocal
     db = SessionLocal()
     try:
         return authenticate_db(db, username, password)
@@ -141,3 +141,4 @@ def require_role(minimum_role: str):
             raise HTTPException(status_code=403, detail=f"Requires {minimum_role} role, caller has {role}")
         return True
     return dependency
+

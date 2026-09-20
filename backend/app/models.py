@@ -17,7 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
-from .database import Base
+from .core.database import Base
 
 
 def now():
@@ -233,3 +233,4 @@ class Dataset(Base):
     geographic_coverage = Column(String)
     last_updated = Column(DateTime, default=now)
     description = Column(String, default="")
+

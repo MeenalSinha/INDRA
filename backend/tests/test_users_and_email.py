@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.database import Base, engine
+from app.core.database import Base, engine
 
 client = TestClient(app)
 
@@ -19,7 +19,7 @@ client = TestClient(app)
 
 def test_demo_users_seeded_in_database():
     """Users table is seeded from DEMO_* env vars on startup."""
-    from app.database import SessionLocal
+    from app.core.database import SessionLocal
     from app import models
 
     db = SessionLocal()
@@ -53,7 +53,7 @@ def test_wrong_password_rejected():
 
 def test_create_user_endpoint_requires_admin_role(monkeypatch):
     """POST /api/auth/users is ADMIN-only when REQUIRE_JWT_AUTH=true."""
-    from app import config as cfg
+    from app.core import config as cfg
     monkeypatch.setattr(cfg, "REQUIRE_JWT_AUTH", True)
 
     # Viewer token should be rejected (403)
@@ -145,3 +145,4 @@ def test_critical_alert_email_convenience_wrapper():
     from app.notifications.email import send_critical_alert_email
     result = send_critical_alert_email("Patna Flood", 12, 0.87)
     assert result is False  # disabled in test env, never raises
+

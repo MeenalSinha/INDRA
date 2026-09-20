@@ -8,7 +8,7 @@ the Datasets page can re-run this for a clean-slate demo).
 import datetime as dt
 import random
 from . import models
-from .database import SessionLocal, engine, Base, ensure_schema
+from .core.database import SessionLocal, engine, Base, ensure_schema
 from .demo.scenarios import SEED_EVENTS
 from .ml.reliability import predict as score_source
 
@@ -206,3 +206,4 @@ def run_seed():
         db.commit()
     finally:
         db.close()
+

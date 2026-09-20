@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import or_
 from .. import models, schemas
-from ..database import get_db
+from ..core.database import get_db
 from ..ingestion.adapters import ingest_report
 from ..security.auth import require_admin
 from ..security.jwt_auth import require_role
+from ..services.report_service import report_service
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -41,34 +42,26 @@ def list_reports(
     limit: int = Query(100, le=1000),
     offset: int = 0,
 ):
-    query = db.query(models.Report).options(
-        selectinload(models.Report.media_items), selectinload(models.Report.event_links)
+    total, rows = report_service.list_reports(
+        db,
+        event_type=event_type,
+        state=state,
+        city=city,
+        verification_status=verification_status,
+        source_type=source_type,
+        duplicate_status=duplicate_status,
+        date_from=date_from,
+        date_to=date_to,
+        q=q,
+        skip=offset,
+        limit=limit
     )
-    if date_from:
-        query = query.filter(models.Report.timestamp >= dt.datetime.fromisoformat(date_from))
-    if date_to:
-        query = query.filter(models.Report.timestamp <= dt.datetime.fromisoformat(date_to))
-    if duplicate_status:
-        query = query.filter(models.Report.duplicate_status == duplicate_status)
-    if event_type:
-        query = query.filter(models.Report.event_type == event_type)
-    if state:
-        query = query.filter(models.Report.state == state)
-    if city:
-        query = query.filter(models.Report.city == city)
-    if source_type:
-        query = query.filter(models.Report.source_type == source_type)
-    if q:
-        like = f"%{q}%"
-        query = query.filter(or_(models.Report.text.ilike(like), models.Report.city.ilike(like)))
-    total = query.count()
-    rows = query.order_by(models.Report.timestamp.desc()).offset(offset).limit(limit).all()
     return {"total": total, "items": [_serialize(r) for r in rows]}
 
 
 @router.get("/{report_id}")
 def get_report(report_id: int, db: Session = Depends(get_db)):
-    r = db.query(models.Report).get(report_id)
+    r = report_service.get_report(db, report_id)
     if not r:
         raise HTTPException(404, "Report not found")
     return _serialize(r)
@@ -76,7 +69,7 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
 
 @router.post("")
 async def create_report(payload: schemas.WeatherReport, db: Session = Depends(get_db)):
-    report = await ingest_report(db, payload.model_dump())
+    report = await report_service.create_report(db, payload.model_dump())
     return _serialize(report)
 
 
@@ -91,13 +84,8 @@ def mark_duplicate(report_id: int, payload: schemas.DuplicateMarkIn, db: Session
 
 @router.post("/{report_id}/link/{event_id}")
 def link_report_to_event(report_id: int, event_id: int, db: Session = Depends(get_db)):
-    report = db.query(models.Report).get(report_id)
-    event = db.query(models.Event).get(event_id)
-    if not report or not event:
+    report = report_service.link_report_to_event(db, report_id, event_id)
+    if not report:
         raise HTTPException(404, "Report or event not found")
-    exists = db.query(models.EventReport).filter_by(report_id=report_id, event_id=event_id).first()
-    if not exists:
-        db.add(models.EventReport(report_id=report_id, event_id=event_id))
-        event.report_count = db.query(models.EventReport).filter_by(event_id=event_id).count()
-        db.commit()
     return _serialize(report)
+

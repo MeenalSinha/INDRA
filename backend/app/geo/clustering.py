@@ -5,7 +5,7 @@ so eps is expressed in real kilometers rather than raw degrees. This is the
 """
 import numpy as np
 from sklearn.cluster import DBSCAN
-from .. import config
+from ..core import config
 
 
 def cluster_reports(reports: list):
@@ -31,3 +31,4 @@ def cluster_reports(reports: list):
     for report, label in zip(usable, db.labels_):
         clusters.setdefault(int(label), []).append(report.id)
     return clusters
+

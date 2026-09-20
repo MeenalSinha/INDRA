@@ -28,7 +28,7 @@ import os
 import uuid
 from datetime import timedelta
 
-from . import config
+from .core import config
 
 log = logging.getLogger("indra.storage")
 
@@ -102,3 +102,4 @@ def save_media(file_bytes: bytes, original_filename: str, content_type: str) -> 
     with open(dest_path, "wb") as f:
         f.write(file_bytes)
     return f"/media/{safe_name}"
+

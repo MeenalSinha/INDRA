@@ -1,7 +1,7 @@
 import logging
 from typing import List, Dict
 from sqlalchemy import text
-from .. import config
+from ..core import config
 from ..geo.utils import haversine_km
 
 log = logging.getLogger("indra.geo.risk_zones")
@@ -37,3 +37,4 @@ def check_intersection(lat: float, lon: float, zones: List[Dict]) -> List[Dict]:
             intersecting.append(z)
             
     return intersecting
+

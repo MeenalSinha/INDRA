@@ -19,7 +19,7 @@ optional piece of infrastructure.
 import time
 from collections import defaultdict, deque
 from fastapi import Header, HTTPException, Request
-from .. import config
+from ..core import config
 
 _redis_client = None
 _redis_unavailable = False
@@ -82,3 +82,4 @@ def check_rate_limit(request: Request):
         raise HTTPException(status_code=429, detail="Rate limit exceeded, slow down")
     log.append(now)
     return True
+

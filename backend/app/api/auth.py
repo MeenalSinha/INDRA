@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..security.jwt_auth import authenticate, hash_password, require_role
-from ..database import get_db
+from ..core.database import get_db
 from .. import models
 from ..security.auth import require_admin
 
@@ -92,3 +92,4 @@ def demo_credentials():
             {"username": os.getenv("DEMO_VIEWER_USERNAME", "viewer"), "role": "VIEWER"},
         ],
     }
+

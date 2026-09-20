@@ -6,7 +6,7 @@ time_gap < window_minutes => LIKELY_DUPLICATE. Originals are never deleted;
 duplicates are flagged and linked (`duplicate_of_report_id`) so all raw
 reports remain auditable, per requirement.
 """
-from .. import config
+from ..core import config
 from ..geo.utils import haversine_km
 from .embeddings import pairwise_similarity
 
@@ -54,3 +54,4 @@ def find_duplicates(reports: list):
                 })
                 claimed.add(reports[j].id)
     return results
+
